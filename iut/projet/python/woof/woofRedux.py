@@ -37,8 +37,7 @@ import urllib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import configparser
 from urllib.parse import urlparse, quote, unquote
-from urllib import parse, request
-import shutil
+from urllib import request
 import tarfile
 import zipfile
 import struct
@@ -143,8 +142,10 @@ class ForkingHTTPServer(HTTPServer):
 # instances of this class.
 class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
     last_server_version = "Simons FileServer"
+    last_protocol_version = "HTTP/1.0"
     server_version = "Guilhem Mateo FileServer"
-    protocol_version = "HTTP/1.0"
+    protocol_version = "HTTP/1.1"
+
 
     filename = "."
 
@@ -164,7 +165,6 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
         if not type_f:
             print("can only serve files or directories. Aborting.", file=sys.stderr)
             sys.exit(1)
-        self.send_head()
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Disposition",
@@ -174,10 +174,11 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             if type_f == "file":
-                datafile = open(self.filename, 'w+')
-                shutil.copyfileobj(datafile, self.wfile)
-                datafile.close()
-                self.wfile.close()
+                with open(self.filename, 'r') as content_file:
+                    content = content_file.read()
+                    self.wfile.write(content.encode('utf-8'))
+                    print("File Woofed to : ",self.address_string())
+                    return
             elif type_f == "dir":
                 if compressed == 'zip':
                     ezfile = EvilZipStreamWrapper(self.wfile)
@@ -211,24 +212,30 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
         # taken from
         # http://mail.python.org/pipermail/python-list/2006-September/402441.html
 
-        ctype, pdict = cgi.parse_header(self.headers.getheader('Content-Type'))
+        #ctype, pdict = cgi.parse_header(self.headers.getheader('Content-Type'))
         form = cgi.FieldStorage(fp=self.rfile,
                                 headers=self.headers,
                                 environ={'REQUEST_METHOD': 'POST'},
                                 keep_blank_values=1,
                                 strict_parsing=1)
-        if not form.has_key("upfile"):
+
+        #TODO ERREUR ECRITURE FICHIER
+        #TODO LECTURE ENTETE HTTP
+        #TODO VERIFIER AUTRE BUGS !
+        if len(form) == 0:
+            print("AIE")
             self.send_error(403, "No upload provided")
             return
 
         upfile = form["upfile"]
 
         if not upfile.file or not upfile.filename:
+            print("AIE")
             self.send_error(403, "No upload provided")
             return
 
         upfilename = upfile.filename
-
+        print("File POSTED : ",upfilename)
         if "\\" in upfilename:
             upfilename = upfilename.split("\\")[-1]
 
@@ -248,10 +255,9 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
         if not destfile:
             upfilename += "."
             destfile, destfilename = tempfile.mkstemp(prefix=upfilename, dir=".")
+        print("accepting uploaded file: %s -> %s" % (upfilename, destfilename))
 
-        print("accepting uploaded file: %s -> %s" % (upfilename, destfilename), file=sys.stderr)
-
-        shutil.copyfileobj(upfile.file, os.fdopen(destfile, "w"))
+        destfile.write(upfile.file)
 
         if upfile.done == -1:
             self.send_error(408, "upload interrupted")
@@ -265,16 +271,13 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
                 </body>
               </html>
             """
-        txt = txt.encode('utf-8')
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.send_header("Content-Length", str(len(txt)))
         self.end_headers()
-        self.wfile.write(txt)
-        self.wfile.close()
+        self.wfile.write(txt.encode('utf-8'))
 
         maxdownloads -= 1
-
         return
 
     def do_GET(self):
@@ -298,7 +301,7 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(txt)))
             self.end_headers()
-            self.wfile.write(txt)
+            self.wfile.write(txt.encode('utf-8'))
             return
 
         # Redirect any request to the filename of the file to serve.
@@ -326,7 +329,7 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(txt)))
             self.end_headers()
-            self.wfile.write(txt)
+            self.wfile.write(txt.encode('utf-8'))
             return
 
         maxdownloads -= 1
@@ -429,6 +432,7 @@ def woof_client(url):
     urlparts = urlparse(url, "http")
     print(urlparts)
     if urlparts[0] not in ["http", "https"] or urlparts[1] == '':
+        print("die ?")
         return None
 
     fname = None
@@ -460,9 +464,8 @@ def woof_client(url):
         fname = unquote(fname)
         fname = os.path.basename(fname)
     print("SALUT")
-    readline.set_startup_hook(lambda: readline.insert_text(fname))
+
     fname = input("Enter target filename: ")
-    readline.set_startup_hook(None)
 
     override = False
 
@@ -500,6 +503,9 @@ def woof_client(url):
 
     print("downloading file: %s -> %s" % (fname, destfilename))
 
+
+    #TODO UTILISER OPEN(file)
+    open(f)
     shutil.copyfileobj(f, os.fdopen(destfile, "w"))
 
     return 1
