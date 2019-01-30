@@ -30,32 +30,33 @@ import sys
 import os
 import errno
 import socket
-import getopt
-import tempfile  # , commands
-import cgi
+import getopt # MANAGE INPUT OPTIONS
+import tempfile
+import cgi # ANALYSE HTTP HEADER
 import urllib
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import configparser
+import configparser # MANAGE CONFIG FILES
 from urllib.parse import urlparse, quote, unquote
-from urllib import request
+from urllib import request # TODO COMPARE URLLIB3 && REQUESTS ( TO LOOK FOR CHANGE )
 import tarfile
 import zipfile
 import struct
-<<<<<<< HEAD
 import shutil
-from threading import Thread
-from io import BytesIO
-=======
-from threading import Thread
->>>>>>> f2ab3e70d8267d944386e9447be3ab515e12ac69
+from threading import Thread # THREAD
 
 maxdownloads = 1
 TM = object
 cpid = -1
-compressed = 'gz'
+compressed = 'zip'
 upload = False
 threads = []
 
+
+def zipdir(path, ziph):
+    # ziph is zipfile handle
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            ziph.write(os.path.join(root, file))
 
 class EvilZipStreamWrapper(TM):
     def __init__(self, victim):
@@ -152,10 +153,6 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
     server_version = "Guilhem Mateo FileServer"
     protocol_version = "HTTP/1.1"
 
-<<<<<<< HEAD
-=======
-
->>>>>>> f2ab3e70d8267d944386e9447be3ab515e12ac69
     filename = "."
 
     def log_request(self, code='-', size='-'):
@@ -163,11 +160,8 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
             BaseHTTPRequestHandler.log_request(self, code, size)
 
     def process_todo(self):
-<<<<<<< HEAD
         print("PROCESS")
 
-=======
->>>>>>> f2ab3e70d8267d944386e9447be3ab515e12ac69
         type_f = None
 
         if os.path.isfile(self.filename):
@@ -184,63 +178,49 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Disposition",
                          "attachment;filename=%s" % quote(os.path.basename(self.filename)))
         if os.path.isfile(self.filename):
-<<<<<<< HEAD
             self.send_header("Content-Length" ,os.path.getsize(self.filename))
         self.end_headers()
+
         try:
             if type_f == "file":
-                print("FILE")
-                with open(self.filename, 'rb') as f :
-                    print("OPEN")
+                with open(self.filename, 'rb') as f:
                     shutil.copyfileobj(f, self.wfile)
-                    print("COPY")
                     f.close()
                     print("File Woofed to : ", self.address_string())
-                    sys.exit()
-=======
-            self.send_header("Content-Length",os.path.getsize(self.filename))
-        self.end_headers()
-        try:
-            if type_f == "file":
-                with open(self.filename, 'r') as content_file:
-                    content = content_file.read()
-                    self.wfile.write(content.encode('utf-8'))
-                    print("File Woofed to : ",self.address_string())
                     return
->>>>>>> f2ab3e70d8267d944386e9447be3ab515e12ac69
             elif type_f == "dir":
-                if compressed == 'zip':
-                    ezfile = EvilZipStreamWrapper(self.wfile)
-                    zfile = zipfile.ZipFile(ezfile, 'w+', zipfile.ZIP_DEFLATED)
-                    stripoff = os.path.dirname(self.filename) + os.sep
-
-                    for root, dirs, files in os.walk(self.filename):
-                        for f in files:
-                            filename = os.path.join(root, f)
-                            if filename[:len(stripoff)] != stripoff:
-                                raise Exception("invalid filename assumptions, please report!")
-                            zfile.write(filename, filename[len(stripoff):])
+                if compressed == 'zip': # TODO DEBUG ZIP
+                    #ezfile = EvilZipStreamWrapper(self.wfile)
+                    zfile = zipfile.ZipFile("test.zip", 'w', zipfile.ZIP_DEFLATED)
+                    #stripoff = os.path.dirname(self.filename) + os.sep
+                    print("DIR NAME",self.filename)
+                    zipdir(self.filename,zfile)
                     zfile.close()
-                else:
+                    #for root, dirs, files in os.walk(self.filename):
+                    #    for f in files:
+                    #        filename = os.path.join(root, f)
+                    #        if filename[:len(stripoff)] != stripoff:
+                    #            raise Exception("invalid filename assumptions, please report!")
+                    #        zfile.write(filename, filename[len(stripoff):])
+                    #zfile.close()
+                    with open("test.zip", 'rb') as zip :
+                        shutil.copyfileobj(zip, self.wfile)
+                        zip.close()
+                    print("FIN")
+                else: # TODO TEST FONCTIONNEMENT TAR / TARGZ / BZIP2 ...
                     tfile = tarfile.open(mode=('w|' + compressed),
                                          fileobj=self.wfile)
                     tfile.add(self.filename,
                               arcname=os.path.basename(self.filename))
                     tfile.close()
-<<<<<<< HEAD
                     print("Direct Woofed to : ", self.address_string())
-=======
->>>>>>> f2ab3e70d8267d944386e9447be3ab515e12ac69
         except Exception as e:
-            print(e)
+            print("EXCEPTION : ",e, file=sys.stderr)
             print("Connection broke. Aborting", file=sys.stderr)
 
     def do_POST(self):
         global maxdownloads, upload
-<<<<<<< HEAD
-=======
         print("POST")
->>>>>>> f2ab3e70d8267d944386e9447be3ab515e12ac69
         if not upload:
             self.send_error(501, "Unsupported method (POST)")
             return
@@ -248,45 +228,25 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
         # taken from
         # http://mail.python.org/pipermail/python-list/2006-September/402441.html
 
-<<<<<<< HEAD
         # ctype, pdict = cgi.parse_header(self.headers.getheader('Content-Type'))
-=======
-        #ctype, pdict = cgi.parse_header(self.headers.getheader('Content-Type'))
->>>>>>> f2ab3e70d8267d944386e9447be3ab515e12ac69
         form = cgi.FieldStorage(fp=self.rfile,
                                 headers=self.headers,
                                 environ={'REQUEST_METHOD': 'POST'},
                                 keep_blank_values=1,
                                 strict_parsing=1)
 
-<<<<<<< HEAD
         if len(form) == 0:
-=======
-        #TODO ERREUR ECRITURE FICHIER
-        #TODO LECTURE ENTETE HTTP
-        #TODO VERIFIER AUTRE BUGS !
-        if len(form) == 0:
-            print("AIE")
->>>>>>> f2ab3e70d8267d944386e9447be3ab515e12ac69
             self.send_error(403, "No upload provided")
             return
 
         upfile = form["upfile"]
-<<<<<<< HEAD
-        if not upfile.filename:
-=======
-
         if not upfile.file or not upfile.filename:
             print("AIE")
->>>>>>> f2ab3e70d8267d944386e9447be3ab515e12ac69
             self.send_error(403, "No upload provided")
             return
 
         upfilename = upfile.filename
-<<<<<<< HEAD
-=======
         print("File POSTED : ",upfilename)
->>>>>>> f2ab3e70d8267d944386e9447be3ab515e12ac69
         if "\\" in upfilename:
             upfilename = upfilename.split("\\")[-1]
 
@@ -295,7 +255,6 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
         destfile = None
         for suffix in ["", ".1", ".2", ".3", ".4", ".5", ".6", ".7", ".8", ".9"]:
             destfilename = os.path.join(".", upfilename + suffix)
-<<<<<<< HEAD
             if(os.path.isfile(destfilename)) :
                 continue
             else :
@@ -309,27 +268,12 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
 
         if not destfile:
             upfilename += "."
+            destfile, destfilename = tempfile.mkstemp(prefix=upfilename, dir=".")
         print("Accepting uploaded file: %s -> %s" % (upfilename, destfilename))
         os.close(destfile)
-        with open(destfilename,'wb', encoding="utf8") as f :
+        with open(destfilename, 'wb') as f:
             f.write(upfile.value)
-=======
-            try:
-                destfile = os.open(destfilename, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
-                break
-            except OSError as e:
-                if e.errno == errno.EEXIST:
-                    continue
-                raise
 
-        if not destfile:
-            upfilename += "."
-            destfile, destfilename = tempfile.mkstemp(prefix=upfilename, dir=".")
-        print("accepting uploaded file: %s -> %s" % (upfilename, destfilename))
-
-        destfile.write(upfile.file)
-
->>>>>>> f2ab3e70d8267d944386e9447be3ab515e12ac69
         if upfile.done == -1:
             self.send_error(408, "upload interrupted")
 
@@ -376,6 +320,7 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
             return
 
         # Redirect any request to the filename of the file to serve.
+        # This hands over the filename to the client.
         # This hands over the filename to the client.
 
         self.path = quote(unquote(self.path))
@@ -500,10 +445,8 @@ def usage(defport, defmaxdown, errmsg=None):
 
 
 def woof_client(url):
-<<<<<<< HEAD
     print("WOOF CLIENT")
-=======
->>>>>>> f2ab3e70d8267d944386e9447be3ab515e12ac69
+
     urlparts = urlparse(url, "http")
     print(urlparts)
     if urlparts[0] not in ["http", "https"] or urlparts[1] == '':
@@ -511,17 +454,15 @@ def woof_client(url):
         return None
 
     fname = None
+    try :
+        f = urllib.request.urlopen(url)
+        f_meta = f.info()
+        disp = f_meta.get("Content-Disposition")
+        print(disp)
+    except OSError as e:
+        print(e)
+        sys.exit(1)
 
-    f = urllib.request.urlopen(url)
-
-    f_meta = f.info()
-<<<<<<< HEAD
-    disp = f_meta.get_header("Content-Disposition")
-    print(disp)
-=======
-    disp = f_meta.getheader("Content-Disposition")
-
->>>>>>> f2ab3e70d8267d944386e9447be3ab515e12ac69
     if disp:
         disp = disp.split(";")
 
@@ -531,11 +472,8 @@ def woof_client(url):
             fname = fname[0]
         else:
             fname = None
-<<<<<<< HEAD
     print(fname)
-=======
 
->>>>>>> f2ab3e70d8267d944386e9447be3ab515e12ac69
     if fname is None:
         url = f.geturl()
         urlparts = urlparse(url)
@@ -547,7 +485,6 @@ def woof_client(url):
     if fname:
         fname = unquote(fname)
         fname = os.path.basename(fname)
-    print("SALUT")
 
     fname = input("Enter target filename: ")
 
@@ -587,12 +524,6 @@ def woof_client(url):
 
     print("downloading file: %s -> %s" % (fname, destfilename))
 
-<<<<<<< HEAD
-    # TODO UTILISER OPEN(file)
-=======
-
-    #TODO UTILISER OPEN(file)
->>>>>>> f2ab3e70d8267d944386e9447be3ab515e12ac69
     open(f)
     shutil.copyfileobj(f, os.fdopen(destfile, "w"))
 
