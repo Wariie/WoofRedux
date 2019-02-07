@@ -28,21 +28,21 @@
 
 import sys
 import os
+import re
 import errno
 import socket
-import getopt # MANAGE INPUT OPTIONS
+import getopt  # MANAGE INPUT OPTIONS
 import tempfile
-import cgi # ANALYSE HTTP HEADER
-import urllib
+import cgi  # ANALYSE HTTP HEADER
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import configparser # MANAGE CONFIG FILES
+import configparser  # MANAGE CONFIG FILES
 from urllib.parse import urlparse, quote, unquote
-from urllib import request # TODO COMPARE URLLIB3 && REQUESTS ( TO LOOK FOR CHANGE )
+import requests
 import tarfile
 import zipfile
 import struct
 import shutil
-from threading import Thread # THREAD
+from threading import Thread  # THREAD
 
 maxdownloads = 1
 TM = object
@@ -57,6 +57,7 @@ def zipdir(path, ziph):
     for root, dirs, files in os.walk(path):
         for file in files:
             ziph.write(os.path.join(root, file))
+
 
 class EvilZipStreamWrapper(TM):
     def __init__(self, victim):
@@ -178,7 +179,7 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Disposition",
                          "attachment;filename=%s" % quote(os.path.basename(self.filename)))
         if os.path.isfile(self.filename):
-            self.send_header("Content-Length" ,os.path.getsize(self.filename))
+            self.send_header("Content-Length", os.path.getsize(self.filename))
         self.end_headers()
 
         try:
@@ -189,25 +190,25 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
                     print("File Woofed to : ", self.address_string())
                     return
             elif type_f == "dir":
-                if compressed == 'zip': # TODO DEBUG ZIP
-                    #ezfile = EvilZipStreamWrapper(self.wfile)
+                if compressed == 'zip':  # TODO DEBUG ZIP
+                    # ezfile = EvilZipStreamWrapper(self.wfile)
                     zfile = zipfile.ZipFile("test.zip", 'w', zipfile.ZIP_DEFLATED)
-                    #stripoff = os.path.dirname(self.filename) + os.sep
-                    print("DIR NAME",self.filename)
-                    zipdir(self.filename,zfile)
+                    # stripoff = os.path.dirname(self.filename) + os.sep
+                    print("DIR NAME", self.filename)
+                    zipdir(self.filename, zfile)
                     zfile.close()
-                    #for root, dirs, files in os.walk(self.filename):
+                    # for root, dirs, files in os.walk(self.filename):
                     #    for f in files:
                     #        filename = os.path.join(root, f)
                     #        if filename[:len(stripoff)] != stripoff:
                     #            raise Exception("invalid filename assumptions, please report!")
                     #        zfile.write(filename, filename[len(stripoff):])
-                    #zfile.close()
-                    with open("test.zip", 'rb') as zip :
+                    # zfile.close()
+                    with open("test.zip", 'rb') as zip:
                         shutil.copyfileobj(zip, self.wfile)
                         zip.close()
                     print("FIN")
-                else: # TODO TEST FONCTIONNEMENT TAR / TARGZ / BZIP2 ...
+                else:  # TODO TEST FONCTIONNEMENT TAR / TARGZ / BZIP2 ...
                     tfile = tarfile.open(mode=('w|' + compressed),
                                          fileobj=self.wfile)
                     tfile.add(self.filename,
@@ -215,7 +216,7 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
                     tfile.close()
                     print("Direct Woofed to : ", self.address_string())
         except Exception as e:
-            print("EXCEPTION : ",e, file=sys.stderr)
+            print("EXCEPTION : ", e, file=sys.stderr)
             print("Connection broke. Aborting", file=sys.stderr)
 
     def do_POST(self):
@@ -246,18 +247,25 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
             return
 
         upfilename = upfile.filename
-        print("File POSTED : ",upfilename)
+        print("File POSTED : ", upfilename)
         if "\\" in upfilename:
             upfilename = upfilename.split("\\")[-1]
 
         upfilename = os.path.basename(upfile.filename)
 
         destfile = None
-        for suffix in ["", ".1", ".2", ".3", ".4", ".5", ".6", ".7", ".8", ".9"]:
-            destfilename = os.path.join(".", upfilename + suffix)
-            if(os.path.isfile(destfilename)) :
+
+        # TODO SUFFIX MANAGEMENT UPDATED (IN PROGRESS)
+        # Separate the file's name from his extension
+        file_extension = upfilename.split(".")[-1]
+        file_name = os.path.splitext(upfilename)[0]
+
+        for suffix in ["", "(1)", "(2)", "(3)", "(4)", "(5)", "(6)", "(7)", "(8)", "(9)"]:
+            # The suffix is put BETWEEN the file's name and its extension
+            destfilename = os.path.join(".", file_name + suffix + "." + str(file_extension))
+            if os.path.isfile(destfilename):
                 continue
-            else :
+            else:
                 try:
                     destfile = os.open(destfilename, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
                     break
@@ -449,44 +457,60 @@ def woof_client(url):
 
     urlparts = urlparse(url, "http")
     print(urlparts)
+
+    # Check if an url has been put on parameter
+    # if not : return None to the main
     if urlparts[0] not in ["http", "https"] or urlparts[1] == '':
         print("die ?")
         return None
 
     fname = None
-    try :
-        f = urllib.request.urlopen(url)
-        f_meta = f.info()
-        disp = f_meta.get("Content-Disposition")
-        print(disp)
+
+    # Get the request
+    try:
+        r = requests.get(url)
     except OSError as e:
         print(e)
         sys.exit(1)
 
-    if disp:
-        disp = disp.split(";")
+    # Get the filename of the request
+    if r:
+        d = r.headers['content-disposition']
+        fname = re.findall('filename=(.+)', d)[0]
 
-    if disp and disp[0].lower() == 'attachment':
-        fname = [x[9:] for x in disp[1:] if x[:9].lower() == "filename="]
-        if len(fname):
-            fname = fname[0]
-        else:
-            fname = None
     print(fname)
-
-    if fname is None:
-        url = f.geturl()
-        urlparts = urlparse(url)
-        fname = urlparts[2]
 
     if not fname:
         fname = "woof-out.bin"
+
+    fname_extension = ""
 
     if fname:
         fname = unquote(fname)
         fname = os.path.basename(fname)
 
-    fname = input("Enter target filename: ")
+        # Get the extension from the file
+        fname_extension = fname.split(".")[-1]
+
+    # MANAGE THE FILE NAME (INVALID CHARACTERS BLOCKED)
+
+    # Boolean which became True when the file's name contain invalid characters
+    fname_invalid = True
+
+    # List of invalid characters
+    invalid_char = ["\\", "/", ":", "*", "?", "\"", "<", ">", "|"]
+
+    while fname_invalid:
+        fname = input("Enter target filename: ")
+
+        # If fname contains invalid characters then print an alert message and user retry
+        # Else continue
+        fname_invalid = any(x in fname for x in invalid_char)
+        if fname_invalid:
+            print("A filename cannot contain any of the following characters: \\ / : * ? \" < > |")
+
+    # Add the extension on the file renamed by the user
+    fname += "." + fname_extension
 
     override = False
 
@@ -506,8 +530,14 @@ def woof_client(url):
         if override:
             destfile = os.open(destfilename, os.O_WRONLY | os.O_CREAT)
         else:
-            for suffix in [".1", ".2", ".3", ".4", ".5", ".6", ".7", ".8", ".9"]:
-                destfilename = os.path.join(".", fname + suffix)
+            # TODO SUFFIX MANAGEMENT UPDATED (IN PROGRESS)
+            # Separate the file's name from his extension
+            file_extension = destfilename.split(".")[-1]
+            file_name = os.path.splitext(destfilename)[0]
+
+            for suffix in ["(1)", "(2)", "(3)", "(4)", "(5)", "(6)", "(7)", "(8)", "(9)"]:
+                # The suffix is put BETWEEN the file's name and its extension
+                destfilename = os.path.join(".", file_name + suffix + "." + str(file_extension))
                 try:
                     destfile = os.open(destfilename,
                                        os.O_WRONLY | os.O_CREAT | os.O_EXCL)
@@ -524,8 +554,7 @@ def woof_client(url):
 
     print("downloading file: %s -> %s" % (fname, destfilename))
 
-    open(f)
-    shutil.copyfileobj(f, os.fdopen(destfile, "w"))
+    open(destfilename, 'wb').write(r.content)
 
     return 1
 
@@ -638,7 +667,7 @@ def main():
 
     serve_files(filename, maxdown, ip_addr, port)
 
-    while (threads.__len__() > 0):
+    while threads.__len__() > 0:
         for t in threads:
             if not t.is_alive():
                 threads.remove(t)
