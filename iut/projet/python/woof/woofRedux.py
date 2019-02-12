@@ -36,82 +36,39 @@ import tempfile
 import cgi  # ANALYSE HTTP HEADER
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import configparser  # MANAGE CONFIG FILES
-from urllib.parse import urlparse, quote, unquote
 import requests
+from requests.utils import urlparse, quote, unquote
 import tarfile
 import zipfile
-import struct
 import shutil
 from threading import Thread  # THREAD
 
 maxdownloads = 1
-TM = object
-cpid = -1
 compressed = 'zip'
 upload = False
 threads = []
 
 
+# Get the content of the directory in path
+# And put it in ziph (a zipfile handler)
 def zipdir(path, ziph):
-    # ziph is zipfile handle
-    for root, dirs, files in os.walk(path):
+    # Get the current path
+    old_cwd = os.getcwd()
+
+    # Change the current path to the argument 'path'
+    os.chdir(path)
+
+    # Get the content of the path (which is current now)
+    for root, dirs, files in os.walk("."):
         for file in files:
             ziph.write(os.path.join(root, file))
 
-
-class EvilZipStreamWrapper(TM):
-    def __init__(self, victim):
-        self.victim_fd = victim
-        self.position = 0
-        self.tells = []
-        self.in_file_data = 0
-
-    def tell(self):
-        self.tells.append(self.position)
-        return self.position
-
-    def seek(self, offset, whence=0):
-        if offset != 0:
-            if offset == self.tells[0] + 14:
-                # the zipfile module tries to fix up the file header.
-                # write Data descriptor header instead,
-                # the next write from zipfile
-                # is CRC, compressed_size and file_size (as required)
-                self.write("PK\007\010")
-            elif offset == self.tells[1]:
-                # the zipfile module goes to the end of the file. The next
-                # data written definitely is infrastructure (in_file_data = 0)
-                self.tells = []
-                self.in_file_data = 0
-            else:
-                raise Exception("unexpected seek for EvilZipStreamWrapper")
-
-    def write(self, data):
-        # only test for headers if we know that we're not writing
-        # (potentially compressed) data.
-        if self.in_file_data == 0:
-            if data[:4] == zipfile.stringFileHeader:
-                # fix the file header for extra Data descriptor
-                hdr = list(struct.unpack(zipfile.structFileHeader, data[:30]))
-                hdr[3] |= (1 << 3)
-                data = struct.pack(zipfile.structFileHeader, *hdr) + data[30:]
-                self.in_file_data = 1
-            elif data[:4] == zipfile.stringCentralDir:
-                # fix the directory entry to match file header.
-                hdr = list(struct.unpack(zipfile.structCentralDir, data[:46]))
-                hdr[5] |= (1 << 3)
-                data = struct.pack(zipfile.structCentralDir, *hdr) + data[46:]
-
-        self.position += len(data)
-        self.victim_fd.write(data)
-
-    def __getattr__(self, name):
-        return getattr(self.victim_fd, name)
+    # Retrieve the original current path
+    os.chdir(old_cwd)
 
 
 # Utility function to guess the IP (as a string) where the server can be
 # reached from the outside. Quite nasty problem actually.
-
 def find_ip():
     # we get a UDP-socket for the TEST-networks reserved by IANA.
     # It is highly unlikely, that there is special routing used
@@ -176,11 +133,14 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
             sys.exit(1)
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Disposition",
-                         "attachment;filename=%s" % quote(os.path.basename(self.filename)))
+        if os.path.isdir(self.filename):
+            self.send_header("Content-Disposition",
+                             "attachment;filename=%s" % quote(os.path.basename(self.filename) + ".zip"))
         if os.path.isfile(self.filename):
+            self.send_header("Content-Disposition",
+                             "attachment;filename=%s" % quote(os.path.basename(self.filename)))
             self.send_header("Content-Length", os.path.getsize(self.filename))
-        self.end_headers()
+            self.end_headers()
 
         try:
             if type_f == "file":
@@ -190,31 +150,31 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
                     print("File Woofed to : ", self.address_string())
                     return
             elif type_f == "dir":
-                if compressed == 'zip':  # TODO DEBUG ZIP
-                    # ezfile = EvilZipStreamWrapper(self.wfile)
-                    zfile = zipfile.ZipFile("test.zip", 'w', zipfile.ZIP_DEFLATED)
-                    # stripoff = os.path.dirname(self.filename) + os.sep
+                if compressed == 'zip':  # TODO DEBUG ZIP (IT WORKS NOW)
+
+                    zfile = zipfile.ZipFile("zip.zip", 'w', zipfile.ZIP_DEFLATED)
+
                     print("DIR NAME", self.filename)
                     zipdir(self.filename, zfile)
                     zfile.close()
-                    # for root, dirs, files in os.walk(self.filename):
-                    #    for f in files:
-                    #        filename = os.path.join(root, f)
-                    #        if filename[:len(stripoff)] != stripoff:
-                    #            raise Exception("invalid filename assumptions, please report!")
-                    #        zfile.write(filename, filename[len(stripoff):])
-                    # zfile.close()
-                    with open("test.zip", 'rb') as zip:
+
+                    with open("zip.zip", 'rb') as zip:
+                        self.send_header("Content-Length", os.path.getsize("zip.zip"))
+                        self.end_headers()
                         shutil.copyfileobj(zip, self.wfile)
                         zip.close()
-                    print("FIN")
-                else:  # TODO TEST FONCTIONNEMENT TAR / TARGZ / BZIP2 ...
+                    os.remove(os.path.abspath("zip.zip"))
+
+                    print("File Woofed to : ", self.address_string())
+                    return
+                else:  # TODO TEST FONCTIONNEMENT TAR / TARGZ / BZIP2 ... (TO DO LATER EVENTUALLY)
                     tfile = tarfile.open(mode=('w|' + compressed),
                                          fileobj=self.wfile)
                     tfile.add(self.filename,
                               arcname=os.path.basename(self.filename))
                     tfile.close()
                     print("Direct Woofed to : ", self.address_string())
+                    return
         except Exception as e:
             print("EXCEPTION : ", e, file=sys.stderr)
             print("Connection broke. Aborting", file=sys.stderr)
@@ -242,7 +202,6 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
 
         upfile = form["upfile"]
         if not upfile.file or not upfile.filename:
-            print("AIE")
             self.send_error(403, "No upload provided")
             return
 
@@ -304,7 +263,7 @@ class FileServHTTPRequestHandler(BaseHTTPRequestHandler):
         return
 
     def do_GET(self):
-        global maxdownloads, cpid, compressed, upload
+        global maxdownloads, compressed, upload
 
         # Form for uploading a file
         if upload:
@@ -402,7 +361,7 @@ def serve_files(filename, maxdown=1, ip_addr='', port=8080):
 
         print("Now serving on %s" % location)
 
-    while cpid != 0 and maxdownloads > 0:
+    while maxdownloads > 0:
         httpd.handle_request()
 
 
@@ -410,7 +369,7 @@ def usage(defport, defmaxdown, errmsg=None):
     name = os.path.basename(sys.argv[0])
     print("""
     Usage: %s [-i <ip_addr>] [-p <port>] [-c <count>] <file>
-           %s [-i <ip_addr>] [-p <port>] [-c <count>] [-z|-j|-Z|-u] <dir>
+           %s [-i <ip_addr>] [-p <port>] [-c <count>] [-z(do not work anymore)|-j(do not work anymore)|-Z|-u] <dir>
            %s [-i <ip_addr>] [-p <port>] [-c <count>] -s
            %s [-i <ip_addr>] [-p <port>] [-c <count>] -U
 
@@ -560,7 +519,7 @@ def woof_client(url):
 
 
 def main():
-    global cpid, upload, compressed
+    global upload, compressed
 
     maxdown = 1
     port = 8080
@@ -579,7 +538,8 @@ def main():
         ip_addr = config.get('main', 'ip')
 
     if config.has_option('main', 'compressed'):
-        formats = {'gz': 'gz',
+        formats = {
+                   'gz': 'gz',
                    'true': 'gz',
                    'bz': 'bz2',
                    'bz2': 'bz2',
@@ -629,10 +589,10 @@ def main():
         elif option == '-U':
             upload = True
 
-        elif option == '-z':
-            compressed = 'gz'
-        elif option == '-j':
-            compressed = 'bz2'
+        # elif option == '-z':
+        #    compressed = 'gz'
+        # elif option == '-j':
+        #    compressed = 'bz2'
         elif option == '-Z':
             compressed = 'zip'
         elif option == '-u':
